@@ -7,10 +7,10 @@ SR = 22050
 max_frequency = SR / 2  # nyquist frequency
 
 # model parameters
-LEARNING_RATE = 0.001
-EPOCHS = 500
-LATENT_DIMS = 1064
-BS = 20
+LEARNING_RATE = 0.0001
+EPOCHS = 2
+LATENT_DIMS = 10
+BS = 3
 N_CONV_LAYERS = 5
 KERNEL_SIZE = 5
 STRIDE = 2
