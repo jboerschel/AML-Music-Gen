@@ -13,10 +13,11 @@ import torch.distributions
 from torch.utils.data import TensorDataset, DataLoader
 from torchvision import transforms, utils
 import datetime
+from sklearn.preprocessing import normalize
 
 torch.manual_seed(0)
 
-device = torch.device('mps')
+device = torch.device('cpu')
 
 dir_str = "./MEL_Converted"
 directory = os.fsencode(dir_str)
@@ -33,6 +34,15 @@ for file in os.listdir(directory):
         continue
 
 data = np.array(data_list)  # / max_frequency  # normalize array
+# storing maximum peak to revert normalization later on
+peak = np.max(data)
+
+# normalizing
+d_min = data.min(axis=(2, 3), keepdims=True)
+d_max = data.max(axis=(2, 3), keepdims=True)
+
+data = (data - d_min) / (d_max - d_min)
+
 print(data.shape)
 print(np.max(data))
 print(np.min(data))
@@ -182,7 +192,8 @@ class Decoder(nn.Module):
         z = F.relu(self.decConv2(z))
         z = F.relu(self.decConv3(z))
         z = F.relu(self.decConv4(z))
-        z = torch.sigmoid(self.decConv5(z))
+        z = F.relu(self.decConv5(z))  # torch.sigmoid(self.decConv5(z))
+
         return z  # .reshape((-1, 1, N_MELS, pow_size))
 
 
@@ -199,7 +210,8 @@ class Autoencoder(nn.Module):
 
 
 def train(autoencoder, data_loader, epochs=20):
-    opt = torch.optim.Adam(autoencoder.parameters(), lr=LEARNING_RATE)
+    learning_rate = LEARNING_RATE
+    opt = torch.optim.Adam(autoencoder.parameters(), lr=learning_rate)
     starttime = datetime.datetime.now()
     print("Starting training at {}".format(starttime))
     current_time = None
@@ -218,16 +230,18 @@ def train(autoencoder, data_loader, epochs=20):
             opt.zero_grad()
 
             x_hat, mu, logVar = autoencoder(x)
+            x_hat = x_hat  # TODO: wenn nicht normiert und sigmoid "denorm"
 
             print(x_hat.shape)
             print(torch.max(x_hat))
             print(torch.min(x_hat))
 
-            kl_divergence = 0.5 * torch.sum(-1 - logVar + mu.pow(2) + logVar.exp())
+            kl_divergence = 0.5 * torch.sum(-1 - logVar + mu.pow(2) + logVar.exp()) / x.shape[0]
             print(kl_divergence)
             # print(F.binary_cross_entropy(x_hat, x, size_average=False))
             # loss_cross_entropy = F.binary_cross_entropy(x_hat, x, size_average=False)
-            loss_mse = ((x - x_hat) ** 2).mean()
+            loss_mse = 0.5 * torch.sum((x - x_hat) ** 2)
+            loss_mse = loss_mse.mean()
             print(loss_mse)
             loss = kl_divergence + loss_mse
             print("Loss = {}".format(loss))
@@ -237,11 +251,13 @@ def train(autoencoder, data_loader, epochs=20):
             opt.step()
         print("Average Loss at Epoch {epoch}: {loss}".format(epoch=epoch, loss=sum(loss_l) / len(loss_l)))
         if epoch % 10 == 0:
+            if DESCENDING_RATE:
+                learning_rate = learning_rate * DESCENDING_RATE_TAU
             sample = torch.randn(1, LATENT_DIMS)
 
             z = torch.Tensor(sample).to(device)
             s = autoencoder.decoder(z)
-            s = s.reshape(N_MELS, pow_size).to('cpu').detach().numpy()  # * max_frequency
+            s = s.reshape(N_MELS, pow_size).to('cpu').detach().numpy()  # * peak
 
             np.save("./result", s)
 
@@ -263,6 +279,9 @@ def train(autoencoder, data_loader, epochs=20):
 
 
 autoencoder = Autoencoder(LATENT_DIMS).to(device)
+if LOAD_MODEL:
+    autoencoder.load_state_dict(torch.load("./Model_Conv_01"))
+    autoencoder.eval()
 
 
 def to_tensor(x):
@@ -309,7 +328,7 @@ ax.set(title='Mel-frequency spectrogram')
 fig.show()
 fig.savefig("./pimmel.png")
 
-torch.save(autoencoder.state_dict(), "./Model_01")
+torch.save(autoencoder.state_dict(), "./Model_Conv_01")
 
 # invert mel spectogram
 audio = librosa.feature.inverse.mel_to_audio(x_hat, sr=SR, n_fft=N_FFT)

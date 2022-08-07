@@ -16,7 +16,7 @@ import datetime
 
 torch.manual_seed(0)
 
-device = torch.device("mps") # mps for m1 gpu, else use cpu or cuda for nvidia graphics cards
+device = torch.device("cpu")  # mps for m1 gpu, cpu or cuda for nvidia graphics cards
 
 dir_str = "./MEL_Converted"
 directory = os.fsencode(dir_str)
@@ -32,7 +32,7 @@ for file in os.listdir(directory):
     else:
         continue
 
-data = np.array(data_list)  / max_frequency  # normalize array
+data = np.array(data_list)  # / max_frequency  # normalize array
 print(data.shape)
 print(np.max(data))
 print(np.min(data))
@@ -43,6 +43,13 @@ input_size = pow_size * N_MELS
 
 layer2_size = int(2 / 3 * input_size)
 layer3_size = int(2 / 3 * layer2_size)
+# normalizing
+d_min = data.min(axis=(1, 2), keepdims=True)
+d_max = data.max(axis=(1, 2), keepdims=True)
+
+
+# data = (data - d_min) / (d_max - d_min)
+
 
 class Encoder(nn.Module):
     def __init__(self, LATENT_DIMS):
@@ -74,14 +81,13 @@ class Decoder(nn.Module):
     def forward(self, z):
         z = F.relu(self.linear1(z))
         z = F.relu(self.linear2(z))
-        z = torch.sigmoid(self.linear3(z))
+        z = F.relu(self.linear3(z))  # torch.sigmoid(self.linear3(z))
         return z.reshape((-1, 1, N_MELS, pow_size))
 
 
 def reparameterize(mu, logVar):
     std = torch.exp(logVar / 2)
     return mu + std * torch.randn_like(std)
-
 
 
 class Autoencoder(nn.Module):
@@ -97,7 +103,9 @@ class Autoencoder(nn.Module):
 
 
 def train(autoencoder, data_loader, epochs=20):
-    opt = torch.optim.Adam(autoencoder.parameters(), lr=LEARNING_RATE)
+    learning_rate = LEARNING_RATE
+
+    opt = torch.optim.Adam(autoencoder.parameters(), lr=learning_rate)
     starttime = datetime.datetime.now()
     print("Starting training at {}".format(starttime))
     current_time = None
@@ -116,12 +124,12 @@ def train(autoencoder, data_loader, epochs=20):
             opt.zero_grad()
 
             x_hat, mu, logVar = autoencoder(x)
-
+            # x_hat = x_hat * max_frequency
             print(x_hat.shape)
             print(torch.max(x_hat))
             print(torch.min(x_hat))
 
-            kl_divergence = 0.5 * torch.sum(-1 - logVar + mu.pow(2) + logVar.exp())/x.shape[0]
+            kl_divergence = 0.5 * torch.sum(-1 - logVar + mu.pow(2) + logVar.exp()) / x.shape[0]
             print(kl_divergence)
             # print(F.binary_cross_entropy(x_hat, x, size_average=False))
             # loss_cross_entropy = F.binary_cross_entropy(x_hat, x, size_average=False)
@@ -136,11 +144,13 @@ def train(autoencoder, data_loader, epochs=20):
             opt.step()
         print("Average Loss at Epoch {epoch}: {loss}".format(epoch=epoch, loss=sum(loss_l) / len(loss_l)))
         if epoch % 10 == 0:
-            sample = torch.randn(1, LATENT_DIMS)
+            if DESCENDING_RATE:
+                learning_rate = learning_rate * DESCENDING_RATE_TAU
 
+            sample = torch.randn(1, LATENT_DIMS)
             z = torch.Tensor(sample).to(device)
             s = autoencoder.decoder(z)
-            s = s.reshape(N_MELS, pow_size).to('cpu').detach().numpy() * max_frequency
+            s = s.reshape(N_MELS, pow_size).to('cpu').detach().numpy()  # * max_frequency
 
             np.save("./result", s)
 
@@ -162,6 +172,10 @@ def train(autoencoder, data_loader, epochs=20):
 
 
 autoencoder = Autoencoder(LATENT_DIMS).to(device)
+
+if LOAD_MODEL:
+    autoencoder.load_state_dict(torch.load("./Model_01"))
+    autoencoder.eval()
 
 
 def to_tensor(x):
@@ -192,7 +206,7 @@ x = torch.randn(1, LATENT_DIMS)
 
 z = torch.Tensor(x).to(device)
 x_hat = autoencoder.decoder(z)
-x_hat = x_hat.reshape(N_MELS, pow_size).to('cpu').detach().numpy()  * max_frequency
+x_hat = x_hat.reshape(N_MELS, pow_size).to('cpu').detach().numpy()  # * max_frequency
 
 np.save("./result", x_hat)
 
