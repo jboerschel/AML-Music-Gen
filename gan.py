@@ -1,16 +1,20 @@
 import argparse
 import os
 
+import denorm as denorm
 import librosa
 import soundfile as sf
 import numpy as np
 
+from matplotlib import pyplot as plt
 import torchvision.transforms as transforms
-from torchvision.utils import save_image
-
+from torchvision.datasets import ImageFolder
+from torchvision.utils import save_image, make_grid
+import torchvision.transforms as tt
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision import datasets
 from torch.autograd import Variable
+import torch.nn.functional as F
 
 import torch.nn as nn
 import torch
@@ -93,44 +97,72 @@ def weights_init_normal(m):
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
+        self.conv_blocks = nn.Sequential(
+
+            nn.ConvTranspose2d(LATENT_DIMS, 1024, kernel_size=4, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(1024, 512, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(512),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(64, 3, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.Tanh()
+        )
+
+        """
         self.init_size = WIDTH // 4
-        self.l1 = nn.Sequential(nn.Linear(LATENT_DIMS, DIM * 16 * DS_WIDTH * DS_HEIGHT))
-        if GAN_LOSS_MODE == "wgan-dg" or GAN_LOSS_MODE == "wgan":
+        # self.l1 = nn.Sequential(nn.Linear(LATENT_DIMS, DIM * 16 * DS_WIDTH * DS_HEIGHT))
+        if GAN_LOSS_MODE == "wgan-gp" or GAN_LOSS_MODE == "wgan":
             self.conv_blocks = nn.Sequential(
-                nn.ConvTranspose2d(DIM * 16, DIM * 8, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(LATENT_DIMS, DIM * 8, 4, stride=2, padding=1, output_padding=1),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.ConvTranspose2d(DIM * 8, DIM * 4, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(DIM * 8, DIM * 4, 4, stride=2, padding=1, output_padding=1),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.ConvTranspose2d(DIM * 4, DIM * 2, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(DIM * 4, DIM * 2, 4, stride=2, padding=1, output_padding=1),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.ConvTranspose2d(DIM * 2, DIM, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(DIM * 2, DIM, 4, stride=2, padding=1, output_padding=1),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.ConvTranspose2d(DIM, 1, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(DIM, 3, 4, stride=2, padding=1, output_padding=1),  # todo: SET BACK TO 1
                 nn.Tanh(),
             )
         else:
             self.conv_blocks = nn.Sequential(
-                nn.BatchNorm2d(DIM * 16),
-                nn.ConvTranspose2d(DIM * 16, DIM * 8, 3, stride=2, padding=1, output_padding=1),
+                # nn.BatchNorm2d(DIM * 16),
+                # nn.ConvTranspose2d(DIM * 16, DIM * 8, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(LATENT_DIMS, DIM * 8, 4, stride=2, padding=1, output_padding=1),
                 nn.BatchNorm2d(DIM * 8, 0.8),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.ConvTranspose2d(DIM * 8, DIM * 4, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(DIM * 8, DIM * 4, 4, stride=2, padding=1, output_padding=1),
                 nn.BatchNorm2d(DIM * 4, 0.8),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.ConvTranspose2d(DIM * 4, DIM * 2, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(DIM * 4, DIM * 2, 4, stride=2, padding=1, output_padding=1),
                 nn.BatchNorm2d(DIM * 2, 0.8),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.ConvTranspose2d(DIM * 2, DIM, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(DIM * 2, DIM, 4, stride=2, padding=1, output_padding=1),
                 nn.BatchNorm2d(DIM, 0.8),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.ConvTranspose2d(DIM, 1, 3, stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(DIM, 3, 4, stride=2, padding=1, output_padding=1),  # todo: SET BACK TO 1
                 nn.Tanh(),
-            )
+            )"""
 
     def forward(self, z):
-        out = self.l1(z)
-        out = out.view(out.shape[0], DIM * 16, DS_HEIGHT, DS_WIDTH)
-        img = self.conv_blocks(out)
+        # out = self.l1(z)
+        # out = out.view(out.shape[0], DIM * 16, DS_HEIGHT, DS_WIDTH)
+        img = self.conv_blocks(z)  # out)
         return img
 
 
@@ -138,19 +170,24 @@ class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
 
-        def discriminator_block(in_filters, out_filters, bn=True):
-            block = [nn.Conv2d(in_filters, out_filters, 3, 2, 1),
+        """        
+    def discriminator_block(in_filters, out_filters, bn=True):
+            block = [nn.Conv2d(in_filters, out_filters, kernel_size=4, stride=2, padding=1),  # todo ksize 3
                      nn.LeakyReLU(0.2, inplace=True)]  # ,nn.Dropout2d(0.25)] -> not in SpecGAN
             if bn and not GAN_LOSS_MODE in ["wgan", "wgan-gp"]:
-                block.append(nn.BatchNorm2d(out_filters, 0.8))
+                block.append(nn.BatchNorm2d(out_filters))
             return block
 
         self.model = nn.Sequential(
-            *discriminator_block(1, DIM, bn=False),
+            *discriminator_block(3, DIM),  # TODO : BACK TO 1
             *discriminator_block(DIM, DIM * 2),
             *discriminator_block(DIM * 2, DIM * 4),
             *discriminator_block(DIM * 4, DIM * 8),
-            *discriminator_block(DIM * 8, DIM * 16),
+            # *discriminator_block(DIM * 8, DIM * 16),
+            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=0, bias=False),  # todo remove
+            nn.Flatten(),
+            nn.Sigmoid()
+
         )
 
         # The height and width of downsampled image
@@ -163,15 +200,45 @@ class Discriminator(nn.Module):
             self.adv_layer = nn.Sequential(
                 nn.Linear(DIM * 16 * DS_HEIGHT * DS_WIDTH, 1))  # sigmoid is not used for Wasserstein GAN
         else:
-            self.adv_layer = nn.Sequential(
-                nn.Linear(DIM * 16 * DS_HEIGHT * DS_WIDTH, 1), nn.Sigmoid())
+            # todo: uncomment later
+            # self.adv_layer = nn.Sequential(
+            #    nn.Linear(DIM * 16 * DS_HEIGHT * DS_WIDTH, 1), nn.Sigmoid())
+            pass
+"""
+        self.model = nn.Sequential(
+
+            nn.Conv2d(3, 64, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(1024),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(1024, 1, kernel_size=4, stride=1, padding=0, bias=False),
+
+            nn.Flatten(),
+            nn.Sigmoid()
+        )
 
     def forward(self, img):
         out = self.model(img)
-        out = out.view(out.shape[0], -1)
-        validity = self.adv_layer(out)
+        # todo: out = out.view(out.shape[0], -1)
+        # todo: validity = self.adv_layer(out)
 
-        return validity
+        return out  # todo: validity
 
 
 # Loss function
@@ -199,7 +266,37 @@ else:
 data_tensor = torch.from_numpy(data)  # transform to torch tensor
 
 dataset = TensorDataset(data_tensor)  # , transform=transforms.ToTensor()) # create datset
+# todo: poke
 
+
+stats = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
+dataset = ImageFolder("./poke_", transform=tt.Compose([
+    tt.Resize(128),
+    tt.CenterCrop(128),
+    tt.ToTensor(),
+    tt.Normalize(*stats),
+    tt.RandomHorizontalFlip(p=0.5)
+]))
+
+
+def denorm(img_tensors):
+    return img_tensors * stats[1][0] + stats[0][0]
+
+
+def show_images(images, nmax=64, epoch=1):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_xticks([])
+    ax.set_yticks([])
+    plt.imsave(f"./poke_result/{epoch}.jpg", make_grid(denorm(images.detach()[:nmax]), nrow=8).permute(1, 2, 0).numpy())
+
+
+def showbatch(dl, nmax=64, epoch=1):
+    for images in dl:
+        show_images(images, nmax, epoch)
+        break
+
+
+# todo: end poke
 dataloader = DataLoader(dataset,
                         batch_size=BS,  # int(2/3 * num_data),
                         shuffle=True)  # create your dataloader
@@ -278,14 +375,15 @@ for epoch in range(EPOCHS):
         optimizer_G.zero_grad()
 
         # Sample noise as generator input
-        z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], LATENT_DIMS))))
-
+        # z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], LATENT_DIMS))))
+        z = torch.randn(BS, LATENT_DIMS, 1, 1)  # random latent tensors
         # Generate a batch of images
         gen_imgs = generator(z)
         d_out_real = discriminator(real_imgs)
         d_out_fake1 = discriminator(gen_imgs)
         d_out_fake2 = discriminator(gen_imgs.detach())  # TODO: .detach()?
-        if batches_done % 10 == 0:
+
+        if "wgan" in GAN_LOSS_MODE and batches_done % 10 == 0:
             # Loss measures generator's ability to fool the discriminator
             if GAN_LOSS_MODE == "wgan":
                 g_loss = -torch.mean(d_out_fake1)
@@ -294,11 +392,11 @@ for epoch in range(EPOCHS):
                 g_loss = d_out_fake1.mean()
                 g_loss.backward(mone)
                 g_loss = -g_loss
-            else:
-                g_loss = adversarial_loss(discriminator(gen_imgs), valid)
-                g_loss.backward()
+        else:
+            g_loss = adversarial_loss(discriminator(gen_imgs), valid)
+            g_loss.backward()
 
-            optimizer_G.step()
+        optimizer_G.step()
 
         # ---------------------
         #  Train Discriminator
@@ -334,9 +432,13 @@ for epoch in range(EPOCHS):
             d_loss = d_loss + gradient_penalty
             '''
         else:
-            real_loss = adversarial_loss(d_out_real, valid)
-            fake_loss = adversarial_loss(d_out_fake2, fake)
-            d_loss = (real_loss + fake_loss) / 2
+
+            # real_loss = adversarial_loss(d_out_real, valid)
+            # fake_loss = adversarial_loss(d_out_fake2, fake)
+            real_loss = F.binary_cross_entropy(d_out_real, valid)
+            fake_loss = F.binary_cross_entropy(d_out_fake2, fake)
+
+            d_loss = (real_loss + fake_loss)  # / 2 TODO: /2?
             d_loss.backward()
 
         # d_loss.backward(retain_graph=True)
@@ -360,15 +462,17 @@ for epoch in range(EPOCHS):
 
         if batches_done % SAVE_INTERVAL == 0:
             plot_imgs = gen_imgs.data[:25]
-            for idx, d in enumerate(plot_imgs):
-                plot_imgs[idx] = denormalize(d)
-            mels_imgs = []
-            for img in plot_imgs:
-                mels_imgs.append(Tensor(librosa.power_to_db(img, ref=np.max)))
-            save_image(mels_imgs, "images/%d.png" % batches_done, nrow=5, normalize=True)
-        if batches_done % 100 == 0:
-            save_sample_to_audio("./audio/%d.wav" % batches_done)
+            # for idx, d in enumerate(plot_imgs):
+            #    plot_imgs[idx] = denormalize(d)
+            # mels_imgs = []
+            # for img in plot_imgs:
+            #    mels_imgs.append(Tensor(librosa.power_to_db(img, ref=np.max)))
+            # save_image(mels_imgs, "images/%d.png" % batches_done, nrow=5, normalize=True)
+            showbatch(plot_imgs, 10, batches_done)
 
+        if batches_done % 100 == 0:
+            # save_sample_to_audio("./audio/%d.wav" % batches_done)
+            pass
 torch.save(generator.state_dict(), "./GAN_G_01")
 torch.save(discriminator.state_dict(), "./GAN_D_01")
 
